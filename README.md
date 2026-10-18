@@ -62,7 +62,7 @@ docker compose --profile publish run --rm publish
 
 ## Deploy on Railway
 
-[`railway.toml`](railway.toml) builds from the Dockerfile and starts via [`scripts/start.sh`](scripts/start.sh) (same as local Docker). On every boot it **re-syncs `config.yml` from env**. If APKs exist and env-driven settings changed, it rebuilds the index **in the background** (so a failed rebuild cannot crash the service). APKs under `/data/apks` are never cleared.
+[`railway.toml`](railway.toml) builds from the Dockerfile and starts via [`scripts/start.sh`](scripts/start.sh) (same as local Docker). A fresh `/data` volume (no `config.yml`) is initialized and given a signed empty repository index before the service starts; an interrupted first build is retried until `repo/index-v1.jar` exists. If initialization or that first build fails, startup stops instead of exposing an unusable repository. On later boots it **re-syncs `config.yml` from env**, while an existing repository can keep serving its last known-good state if that sync fails. If APKs exist and env-driven settings changed, it rebuilds the index **in the background** (so a failed rebuild cannot crash the service). APKs and existing signing keys under `/data` are never cleared or replaced.
 
 1. Create a service from this repo (Railway will pick up the Dockerfile).
 2. **Attach a volume** with mount path **`/data`** (required for APKs, keystore, and generated repo):
@@ -115,7 +115,7 @@ data/
 | Script | Purpose |
 |--------|---------|
 | `scripts/init.sh` | Generate `config.yml` / `rclone.conf` from env |
-| `scripts/build.sh` | Copy APKs, verify, `fdroid update` |
+| `scripts/build.sh` | Copy APKs, verify, `fdroid update`; permits a signed empty index only with `ALLOW_EMPTY_REPO=true` |
 | `scripts/deploy.sh` | `fdroid deploy` if S3 configured; else succeed (self-host) |
 | `scripts/update.sh` | Incremental init + build + deploy (webhooks) |
 | `scripts/publish.sh` | Clean + full rebuild + deploy |

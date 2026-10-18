@@ -221,7 +221,7 @@ digitalmarket-fdroid-server/
 ├── Dockerfile                  # Multi-stage: frontend build + runtime
 ├── docker-compose.yml
 ├── .env                        # Minimal: just DATA_DIR and PORT
-└── .env.example
+└── env.example
 ```
 
 ## Docker Deployment

@@ -15,7 +15,7 @@ Default: `SELF_HOST=true` with blank S3 keys → self-host only.
 ## Quick start (Docker)
 
 ```bash
-cp .env.example .env
+cp env.example .env
 # Set WEBHOOK_TOKEN, REPO_URL, and optionally S3_* / SELF_HOST
 
 mkdir -p data
@@ -83,7 +83,7 @@ docker compose --profile publish run --rm publish
 Requires `fdroidserver`, `rclone`, Android SDK build-tools (`apksigner`), and Java 17+.
 
 ```bash
-cp .env.example .env
+cp env.example .env
 # optional: export DATA_DIR=./data
 
 ./scripts/init.sh
@@ -126,7 +126,7 @@ data/
 
 ## Environment
 
-See [`.env.example`](.env.example):
+See [`env.example`](env.example):
 
 - **Mode**: `SELF_HOST`, `DATA_DIR`
 - **Repo**: `REPO_NAME`, `REPO_URL`, `REPO_DESCRIPTION`, `REPO_WEB_BASE_URL`

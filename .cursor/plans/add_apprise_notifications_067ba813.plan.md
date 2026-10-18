@@ -12,7 +12,7 @@ todos:
     content: Call notifier from run_publish_job on success/failure
     status: completed
   - id: docs
-    content: Document APPRISE_CONFIG_URL in .env.example and README
+    content: Document APPRISE_CONFIG_URL in env.example and README
     status: completed
 isProject: false
 ---
@@ -64,7 +64,7 @@ After each `write_status(...)` for success, script failure, and exception failur
 
 ### 4. Config + docs
 
-- [`.env.example`](.env.example) — new section:
+- [`env.example`](env.example) — new section:
 
 ```bash
 # -- Notifications (Apprise) -------------------------------------------------

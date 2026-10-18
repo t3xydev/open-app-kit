@@ -15,7 +15,7 @@ todos:
     content: "Long-running Dockerfile + compose: one data volume only; API + nginx serving data/repo/; ports; optional one-shot publish profile"
     status: completed
   - id: docs-env
-    content: "Update .env.example and README: SELF_HOST flag, self-host vs S3-primary modes, webhook usage"
+    content: "Update env.example and README: SELF_HOST flag, self-host vs S3-primary modes, webhook usage"
     status: completed
 isProject: false
 ---
@@ -139,7 +139,7 @@ New [`backend/`](backend/) (minimal):
 
 ### 4. Config / docs
 
-- Extend [`.env.example`](.env.example): `SELF_HOST`, `WEBHOOK_TOKEN`, `DATA_DIR`; document mode selection (`SELF_HOST=true` **or** leave S3 blank = self-host; S3 set + `SELF_HOST` unset = S3 primary).
+- Extend [`env.example`](env.example): `SELF_HOST`, `WEBHOOK_TOKEN`, `DATA_DIR`; document mode selection (`SELF_HOST=true` **or** leave S3 blank = self-host; S3 set + `SELF_HOST` unset = S3 primary).
 - Update [`README.md`](README.md): `docker compose up`, one-volume layout, webhook examples, self-host vs S3 primary.
 
 ### 5. Explicitly out of scope (future GUI)
@@ -152,7 +152,7 @@ New [`backend/`](backend/) (minimal):
 - [`scripts/publish.sh`](scripts/publish.sh) / [`build.sh`](scripts/build.sh) / [`init.sh`](scripts/init.sh) — `DATA_DIR` + dual-mode deploy
 - [`Dockerfile`](Dockerfile) / [`docker-compose.yml`](docker-compose.yml) — one volume `./data:/data`
 - `backend/main.py` (new) — webhooks + status + static repo
-- [`.env.example`](.env.example) / [`README.md`](README.md) — mode + volume docs
+- [`env.example`](env.example) / [`README.md`](README.md) — mode + volume docs
 
 ## Default decisions (locked for this plan)
 

@@ -42,7 +42,7 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
 COPY scripts/ scripts/
 COPY backend/ backend/
 COPY assets/ assets/
-COPY .env.example .env.example
+COPY env.example env.example
 
 RUN chmod +x scripts/*.sh \
     && mkdir -p /data

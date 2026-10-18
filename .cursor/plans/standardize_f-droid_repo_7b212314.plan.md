@@ -3,7 +3,7 @@ name: Standardize F-Droid Repo
 overview: Refactor the F-Droid repo into a portable, env-driven setup where a single `.env` file drives both `config.yml` and `rclone.conf` generation, with shell scripts that work standalone or inside Docker.
 todos:
   - id: env-example
-    content: Create `.env.example` with all configurable variables for both config.yml and rclone
+    content: Create `env.example` with all configurable variables for both config.yml and rclone
     status: completed
   - id: init-script
     content: Create `scripts/init.sh` that generates config.yml and rclone.conf from .env
@@ -73,7 +73,7 @@ flowchart TD
 
 ## Changes
 
-### 1. Create `.env.example` -- single config source
+### 1. Create `env.example` -- single config source
 
 All config for both `config.yml` and `rclone.conf` in one file:
 
@@ -151,7 +151,7 @@ services:
 
 ```
 .
-├── .env.example          # Template -- copy to .env and fill in
+├── env.example          # Template -- copy to .env and fill in
 ├── .env                  # Actual config (gitignored)
 ├── .gitignore
 ├── README.md

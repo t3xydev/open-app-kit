@@ -18,6 +18,8 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.notify import notify_publish_result
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(ROOT_DIR))).resolve()
 SCRIPTS_DIR = ROOT_DIR / "scripts"
@@ -225,6 +227,11 @@ async def run_publish_job(trigger: str) -> dict[str, Any]:
                     "log": "",
                 }
             )
+            await notify_publish_result(
+                status="failed",
+                trigger=trigger,
+                message=str(exc),
+            )
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         finished = datetime.now(timezone.utc).isoformat()
@@ -240,6 +247,12 @@ async def run_publish_job(trigger: str) -> dict[str, Any]:
                     "log": result["log"][-20000:],
                 }
             )
+            await notify_publish_result(
+                status="success",
+                trigger=trigger,
+                message="Publish succeeded",
+                exit_code=result["exit_code"],
+            )
         else:
             write_status(
                 {
@@ -251,6 +264,13 @@ async def run_publish_job(trigger: str) -> dict[str, Any]:
                     "exit_code": result["exit_code"],
                     "log": result["log"][-20000:],
                 }
+            )
+            await notify_publish_result(
+                status="failed",
+                trigger=trigger,
+                message="Publish failed",
+                exit_code=result["exit_code"],
+                log_tail=result["log"][-500:],
             )
             raise HTTPException(
                 status_code=500,

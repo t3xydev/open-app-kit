@@ -132,4 +132,5 @@ See [`.env.example`](.env.example):
 - **Repo**: `REPO_NAME`, `REPO_URL`, `REPO_DESCRIPTION`, `REPO_WEB_BASE_URL`
 - **Signing**: `KEYSTORE_FILE`, `REPO_KEYALIAS`, `KEYSTORE_PASS`, `KEY_PASS`, `KEYDNAME`
 - **Webhooks**: `WEBHOOK_TOKEN`, optional `EAS_WEBHOOK_SECRET` for `/hooks/eas`
+- **Notifications**: `APPRISE_CONFIG_URL` — Apprise [configuration URL](https://github.com/caronc/apprise/wiki/config) for publish success/failure alerts (leave blank to disable). Recommended: `/data/apprise.yml` on the volume with your service URLs (`discord://…`, etc.).
 - **S3**: `S3_REMOTE_NAME`, `S3_PROVIDER`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_ENDPOINT`

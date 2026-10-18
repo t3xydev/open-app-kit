@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.notify import notify_publish_result
@@ -312,6 +312,51 @@ def api_status() -> dict[str, Any]:
     return status
 
 
+@app.get("/api/apps")
+def api_apps() -> dict[str, Any]:
+    """Get list of apps from the F-Droid index."""
+    index_file = repo_dir / "index-v1.json"
+    
+    if not index_file.exists():
+        return {"apps": []}
+    
+    try:
+        index_data = json.loads(index_file.read_text(encoding="utf-8"))
+        apps = []
+        
+        for app_id, app_data in index_data.get("apps", {}).items():
+            metadata = app_data.get("localized", {}).get("en-US", {})
+            name = metadata.get("name", app_id)
+            latest_version = metadata.get("summary", "")
+            
+            # Get the latest APK version
+            versions = app_data.get("versions", {})
+            if versions:
+                version_code = max(versions.keys())
+                version_info = versions[version_code]
+                version_name = version_info.get("versionName", latest_version)
+                apk_name = version_info.get("apkName", f"{app_id}.apk")
+                
+                # Determine download URL based on mode
+                if is_self_host():
+                    download_url = f"/fdroid/repo/{apk_name}"
+                else:
+                    repo_url = os.environ.get("REPO_URL", "").rstrip("/")
+                    download_url = f"{repo_url}/{apk_name}" if repo_url else None
+                
+                if download_url:
+                    apps.append({
+                        "id": app_id,
+                        "name": name,
+                        "version": version_name,
+                        "download_url": download_url,
+                    })
+        
+        return {"apps": apps}
+    except (json.JSONDecodeError, OSError, KeyError):
+        return {"apps": []}
+
+
 @app.post("/hooks/publish")
 async def hooks_publish(_: None = Depends(require_token)) -> dict[str, Any]:
     return await run_publish_job("publish")
@@ -427,8 +472,8 @@ repo_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/fdroid/repo", StaticFiles(directory=str(repo_dir), html=True), name="repo")
 
 
-@app.get("/")
-def root() -> JSONResponse:
+@app.get("/api/info")
+def api_info() -> JSONResponse:
     return JSONResponse(
         {
             "service": "fdroid-server",
@@ -443,3 +488,152 @@ def root() -> JSONResponse:
             },
         }
     )
+
+
+@app.get("/")
+def root() -> HTMLResponse:
+    repo_url = os.environ.get("REPO_URL", "")
+    repo_name = os.environ.get("REPO_NAME", "F-Droid Repository")
+    is_sh = is_self_host()
+    
+    return HTMLResponse(content=f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{repo_name}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }}
+        header {{
+            text-align: center;
+            margin-bottom: 2rem;
+        }}
+        h1 {{
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }}
+        .repo-btn {{
+            display: inline-block;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            margin-top: 1rem;
+        }}
+        .repo-btn:hover {{
+            background: #2563eb;
+        }}
+        .apps-section {{
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }}
+        .apps-section h2 {{
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }}
+        .app-list {{
+            list-style: none;
+        }}
+        .app-item {{
+            padding: 1rem;
+            border-bottom: 1px solid #e5e5e5;
+        }}
+        .app-item:last-child {{
+            border-bottom: none;
+        }}
+        .app-name {{
+            font-weight: 600;
+            font-size: 1.1rem;
+        }}
+        .app-version {{
+            color: #666;
+            font-size: 0.9rem;
+        }}
+        .download-link {{
+            display: inline-block;
+            margin-top: 0.5rem;
+            color: #3b82f6;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }}
+        .download-link:hover {{
+            text-decoration: underline;
+        }}
+        .loading {{
+            text-align: center;
+            color: #666;
+            padding: 2rem;
+        }}
+        .error {{
+            color: #dc2626;
+            text-align: center;
+            padding: 2rem;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{repo_name}</h1>
+            <a href="{repo_url if repo_url else ('/fdroid/repo/' if is_sh else '#')}" class="repo-btn">Add to F-Droid</a>
+        </header>
+        
+        <div class="apps-section">
+            <h2>Available Apps</h2>
+            <div id="app-list" class="loading">Loading apps...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadApps() {{
+            const container = document.getElementById('app-list');
+            try {{
+                const response = await fetch('/api/apps');
+                if (!response.ok) {{
+                    container.innerHTML = '<div class="error">Failed to load apps</div>';
+                    return;
+                }}
+                const data = await response.json();
+                
+                if (!data.apps || data.apps.length === 0) {{
+                    container.innerHTML = '<div class="loading">No apps available yet</div>';
+                    return;
+                }}
+                
+                const html = data.apps.map(app => `
+                    <li class="app-item">
+                        <div class="app-name">${{app.name}}</div>
+                        <div class="app-version">${{app.version}}</div>
+                        <a href="${{app.download_url}}" class="download-link">Download APK</a>
+                    </li>
+                `).join('');
+                
+                container.innerHTML = `<ul class="app-list">${{html}}</ul>`;
+            }} catch (error) {{
+                container.innerHTML = '<div class="error">Failed to load apps</div>';
+            }}
+        }}
+        
+        loadApps();
+    </script>
+</body>
+</html>""")

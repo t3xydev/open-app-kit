@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import html
 import json
 import os
 import re
@@ -15,9 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.catalog import fdroid_deep_link, parse_index_v1, parse_index_v2
 from backend.notify import notify_publish_result
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -301,6 +303,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    icon = DATA_DIR / "assets" / "icon.png"
+    if not icon.is_file():
+        icon = ROOT_DIR / "assets" / "icon.png"
+    return FileResponse(icon, media_type="image/png")
+
+
 @app.get("/api/status")
 def api_status() -> dict[str, Any]:
     status = read_status()
@@ -312,49 +322,52 @@ def api_status() -> dict[str, Any]:
     return status
 
 
+def public_repo_url(request: Request) -> str:
+    configured = os.environ.get("REPO_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return f"{str(request.base_url).rstrip('/')}/fdroid/repo"
+
+
+def read_repo_indexes() -> tuple[dict[str, Any], dict[str, Any]]:
+    indexes: dict[str, dict[str, Any]] = {}
+    for filename in ("index-v1.json", "index-v2.json"):
+        path = DATA_DIR / "repo" / filename
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                indexes[filename] = payload
+        except (json.JSONDecodeError, OSError):
+            continue
+    return indexes.get("index-v1.json", {}), indexes.get("index-v2.json", {})
+
+
 @app.get("/api/apps")
-def api_apps() -> dict[str, Any]:
-    """Get list of apps from the F-Droid index."""
-    index_file = repo_dir / "index-v1.json"
-    
-    if not index_file.exists():
-        return {"apps": []}
-    
-    try:
-        index_data = json.loads(index_file.read_text(encoding="utf-8"))
-        apps = []
-        
-        for app_id, app_data in index_data.get("apps", {}).items():
-            metadata = app_data.get("localized", {}).get("en-US", {})
-            name = metadata.get("name", app_id)
-            latest_version = metadata.get("summary", "")
-            
-            # Get the latest APK version
-            versions = app_data.get("versions", {})
-            if versions:
-                version_code = max(versions.keys())
-                version_info = versions[version_code]
-                version_name = version_info.get("versionName", latest_version)
-                apk_name = version_info.get("apkName", f"{app_id}.apk")
-                
-                # Determine download URL based on mode
-                if is_self_host():
-                    download_url = f"/fdroid/repo/{apk_name}"
-                else:
-                    repo_url = os.environ.get("REPO_URL", "").rstrip("/")
-                    download_url = f"{repo_url}/{apk_name}" if repo_url else None
-                
-                if download_url:
-                    apps.append({
-                        "id": app_id,
-                        "name": name,
-                        "version": version_name,
-                        "download_url": download_url,
-                    })
-        
-        return {"apps": apps}
-    except (json.JSONDecodeError, OSError, KeyError):
-        return {"apps": []}
+def api_apps(request: Request) -> dict[str, Any]:
+    """Return homepage-ready apps from the repository's v2 or v1 index."""
+    repo_url = public_repo_url(request)
+    index_v1, index_v2 = read_repo_indexes()
+    apps = parse_index_v2(index_v2, repo_url) if index_v2 else []
+    if not apps and index_v1:
+        apps = parse_index_v1(index_v1, repo_url)
+
+    repo_metadata = index_v1.get("repo", {}) if isinstance(index_v1.get("repo"), dict) else {}
+    fingerprint = str(repo_metadata.get("fingerprint") or "")
+    return {
+        "apps": apps,
+        "repository": {
+            "name": os.environ.get("REPO_NAME", "F-Droid Repository"),
+            "url": repo_url,
+            "fingerprint": fingerprint,
+            "add_url": fdroid_deep_link(repo_url, fingerprint),
+            "source_url": os.environ.get(
+                "SOURCE_REPO_URL",
+                "https://github.com/t3xydev/app-distribution-kit",
+            ),
+        },
+    }
 
 
 @app.post("/hooks/publish")
@@ -491,149 +504,312 @@ def api_info() -> JSONResponse:
 
 
 @app.get("/")
-def root() -> HTMLResponse:
-    repo_url = os.environ.get("REPO_URL", "")
-    repo_name = os.environ.get("REPO_NAME", "F-Droid Repository")
-    is_sh = is_self_host()
-    
-    return HTMLResponse(content=f"""<!DOCTYPE html>
+def root(request: Request) -> HTMLResponse:
+    repo_url = public_repo_url(request)
+    repo_name = os.environ.get("REPO_NAME", "F-Droid Repository").strip() or "F-Droid Repository"
+    repo_description = (
+        os.environ.get("REPO_DESCRIPTION", "Open Android apps, delivered directly.").strip()
+        or "Open Android apps, delivered directly."
+    )
+    source_url = os.environ.get(
+        "SOURCE_REPO_URL",
+        "https://github.com/t3xydev/app-distribution-kit",
+    ).strip()
+    index_v1, _ = read_repo_indexes()
+    repo_metadata = index_v1.get("repo", {}) if isinstance(index_v1.get("repo"), dict) else {}
+    fingerprint = str(repo_metadata.get("fingerprint") or "")
+    add_url = fdroid_deep_link(repo_url, fingerprint)
+
+    safe_name = html.escape(repo_name)
+    safe_description = html.escape(repo_description)
+    safe_repo_url = html.escape(repo_url, quote=True)
+    safe_add_url = html.escape(add_url, quote=True)
+    safe_source_url = html.escape(source_url, quote=True)
+
+    return HTMLResponse(content=f"""<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{repo_name}</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
-        }}
-        .container {{
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 2rem;
-        }}
-        header {{
-            text-align: center;
-            margin-bottom: 2rem;
-        }}
-        h1 {{
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-        }}
-        .repo-btn {{
-            display: inline-block;
-            background: #3b82f6;
-            color: white;
-            text-decoration: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-weight: 500;
-            margin-top: 1rem;
-        }}
-        .repo-btn:hover {{
-            background: #2563eb;
-        }}
-        .apps-section {{
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }}
-        .apps-section h2 {{
-            font-size: 1.25rem;
-            margin-bottom: 1rem;
-        }}
-        .app-list {{
-            list-style: none;
-        }}
-        .app-item {{
-            padding: 1rem;
-            border-bottom: 1px solid #e5e5e5;
-        }}
-        .app-item:last-child {{
-            border-bottom: none;
-        }}
-        .app-name {{
-            font-weight: 600;
-            font-size: 1.1rem;
-        }}
-        .app-version {{
-            color: #666;
-            font-size: 0.9rem;
-        }}
-        .download-link {{
-            display: inline-block;
-            margin-top: 0.5rem;
-            color: #3b82f6;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }}
-        .download-link:hover {{
-            text-decoration: underline;
-        }}
-        .loading {{
-            text-align: center;
-            color: #666;
-            padding: 2rem;
-        }}
-        .error {{
-            color: #dc2626;
-            text-align: center;
-            padding: 2rem;
-        }}
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{safe_description}">
+  <meta name="theme-color" content="#0a1714">
+  <title>{safe_name}</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #07110f;
+      --panel: rgba(18, 34, 30, .78);
+      --panel-solid: #10211d;
+      --line: rgba(177, 232, 210, .14);
+      --text: #f5fbf8;
+      --muted: #9db2aa;
+      --accent: #7ef0bd;
+      --accent-strong: #49d89d;
+      --ink: #062217;
+      --radius: 22px;
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ scroll-behavior: smooth; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 80% -10%, rgba(58, 209, 148, .19), transparent 36rem),
+        radial-gradient(circle at -10% 30%, rgba(45, 126, 103, .16), transparent 30rem),
+        var(--bg);
+      line-height: 1.5;
+    }}
+    a {{ color: inherit; }}
+    button, a {{ -webkit-tap-highlight-color: transparent; }}
+    .shell {{ width: min(1120px, calc(100% - 40px)); margin: 0 auto; }}
+    .nav {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 76px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .brand {{ display: flex; align-items: center; gap: 12px; font-weight: 750; letter-spacing: -.02em; }}
+    .brand-mark {{
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      color: var(--ink);
+      background: var(--accent);
+      box-shadow: 0 10px 34px rgba(73, 216, 157, .18);
+    }}
+    .nav-links {{ display: flex; align-items: center; gap: 10px; }}
+    .nav-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 14px;
+      color: var(--muted);
+      text-decoration: none;
+      border-radius: 12px;
+    }}
+    .nav-link:hover {{ color: var(--text); background: rgba(255,255,255,.05); }}
+    .hero {{ display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(310px, .7fr); gap: 56px; padding: 92px 0 78px; align-items: center; }}
+    .eyebrow {{ display: flex; align-items: center; gap: 9px; margin-bottom: 18px; color: var(--accent); font-size: .82rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }}
+    .eyebrow::before {{ content: ""; width: 28px; height: 1px; background: currentColor; }}
+    h1 {{ max-width: 760px; margin: 0; font-size: clamp(3rem, 7vw, 5.7rem); line-height: .98; letter-spacing: -.065em; }}
+    .hero-copy {{ max-width: 650px; margin: 24px 0 32px; color: var(--muted); font-size: clamp(1.02rem, 2vw, 1.2rem); }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 12px; }}
+    .button {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 19px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--text);
+      background: rgba(255,255,255,.035);
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease, border-color .18s ease;
+    }}
+    .button:hover {{ transform: translateY(-2px); border-color: rgba(126,240,189,.35); background: rgba(255,255,255,.07); }}
+    .button-primary {{ color: var(--ink); background: var(--accent); border-color: var(--accent); box-shadow: 0 15px 40px rgba(73,216,157,.16); }}
+    .button-primary:hover {{ background: #95f5ca; border-color: #95f5ca; }}
+    .repo-card {{ position: relative; overflow: hidden; padding: 26px; border: 1px solid var(--line); border-radius: 28px; background: linear-gradient(145deg, rgba(26,51,44,.92), rgba(12,27,23,.88)); box-shadow: 0 30px 70px rgba(0,0,0,.22); }}
+    .repo-card::after {{ content: ""; position: absolute; width: 190px; height: 190px; right: -80px; top: -90px; border-radius: 50%; background: rgba(126,240,189,.09); filter: blur(4px); }}
+    .repo-label {{ color: var(--muted); font-size: .78rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }}
+    .repo-title {{ margin: 12px 0 6px; font-size: 1.45rem; font-weight: 750; letter-spacing: -.03em; }}
+    .repo-note {{ margin: 0 0 24px; color: var(--muted); font-size: .92rem; }}
+    .url-box {{ display: flex; align-items: center; gap: 10px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 14px; background: rgba(2,12,9,.42); }}
+    .url-box code {{ min-width: 0; flex: 1; overflow: hidden; color: #cae6dc; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }}
+    .copy {{ padding: 0; border: 0; color: var(--accent); background: none; font: inherit; font-size: .78rem; font-weight: 750; cursor: pointer; }}
+    .repo-card .button {{ width: 100%; margin-top: 13px; }}
+    .content {{ padding: 20px 0 92px; }}
+    .section-head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 24px; }}
+    h2 {{ margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); letter-spacing: -.045em; }}
+    .section-copy {{ margin: 6px 0 0; color: var(--muted); }}
+    .app-count {{ flex: none; padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .8rem; }}
+    .app-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
+    .app-card {{ display: flex; flex-direction: column; min-height: 246px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); backdrop-filter: blur(14px); transition: transform .2s ease, border-color .2s ease; }}
+    .app-card:hover {{ transform: translateY(-3px); border-color: rgba(126,240,189,.34); }}
+    .app-top {{ display: flex; align-items: center; gap: 15px; }}
+    .app-icon {{ width: 58px; height: 58px; flex: none; overflow: hidden; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 16px; color: var(--accent); background: #19342c; font-weight: 800; font-size: 1.15rem; }}
+    .app-icon img {{ width: 100%; height: 100%; object-fit: cover; }}
+    .app-name {{ margin: 0; font-size: 1.15rem; letter-spacing: -.02em; }}
+    .app-id {{ max-width: 260px; overflow: hidden; margin-top: 3px; color: var(--muted); font: .74rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }}
+    .summary {{ flex: 1; margin: 20px 0; color: var(--muted); font-size: .92rem; }}
+    .app-footer {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; }}
+    .version {{ color: #b8cbc4; font-size: .78rem; }}
+    .app-actions {{ display: flex; align-items: center; gap: 14px; }}
+    .text-link {{ color: var(--muted); font-size: .82rem; font-weight: 650; text-decoration: none; }}
+    .download {{ color: var(--accent); font-size: .82rem; font-weight: 750; text-decoration: none; }}
+    .state {{ grid-column: 1 / -1; padding: 64px 24px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); text-align: center; }}
+    .state strong {{ display: block; margin-bottom: 5px; color: var(--text); font-size: 1rem; }}
+    footer {{ display: flex; justify-content: space-between; gap: 20px; padding: 28px 0 42px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }}
+    @media (max-width: 820px) {{
+      .hero {{ grid-template-columns: 1fr; gap: 36px; padding-top: 64px; }}
+      .repo-card {{ max-width: 560px; }}
+    }}
+    @media (max-width: 620px) {{
+      .shell {{ width: min(100% - 26px, 1120px); }}
+      .nav {{ min-height: 66px; }}
+      .nav-link span {{ display: none; }}
+      .hero {{ padding: 54px 0 62px; }}
+      h1 {{ font-size: clamp(2.8rem, 16vw, 4.2rem); }}
+      .app-grid {{ grid-template-columns: 1fr; }}
+      .section-head {{ align-items: start; }}
+      .app-card {{ min-height: 230px; }}
+      footer {{ flex-direction: column; }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{ * {{ scroll-behavior: auto; transition: none !important; }} }}
+  </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>{repo_name}</h1>
-            <a href="{repo_url if repo_url else ('/fdroid/repo/' if is_sh else '#')}" class="repo-btn">Add to F-Droid</a>
-        </header>
-        
-        <div class="apps-section">
-            <h2>Available Apps</h2>
-            <div id="app-list" class="loading">Loading apps...</div>
-        </div>
+  <header class="shell nav">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M7 4v9.5A3.5 3.5 0 0 0 10.5 17H20" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="m4 10 3 3 3-3M16 14l4 3-4 3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span>{safe_name}</span>
     </div>
+    <nav class="nav-links" aria-label="Repository links">
+      <a class="nav-link" href="{safe_repo_url}"><span>Repository</span> ↗</a>
+      <a class="nav-link" href="{safe_source_url}" target="_blank" rel="noreferrer"><span>Source</span> ↗</a>
+    </nav>
+  </header>
 
-    <script>
-        async function loadApps() {{
-            const container = document.getElementById('app-list');
-            try {{
-                const response = await fetch('/api/apps');
-                if (!response.ok) {{
-                    container.innerHTML = '<div class="error">Failed to load apps</div>';
-                    return;
-                }}
-                const data = await response.json();
-                
-                if (!data.apps || data.apps.length === 0) {{
-                    container.innerHTML = '<div class="loading">No apps available yet</div>';
-                    return;
-                }}
-                
-                const html = data.apps.map(app => `
-                    <li class="app-item">
-                        <div class="app-name">${{app.name}}</div>
-                        <div class="app-version">${{app.version}}</div>
-                        <a href="${{app.download_url}}" class="download-link">Download APK</a>
-                    </li>
-                `).join('');
-                
-                container.innerHTML = `<ul class="app-list">${{html}}</ul>`;
-            }} catch (error) {{
-                container.innerHTML = '<div class="error">Failed to load apps</div>';
-            }}
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Independent app distribution</div>
+        <h1>Your apps.<br>Directly delivered.</h1>
+        <p class="hero-copy">{safe_description} Add this repository once, then install and update every available app from F-Droid.</p>
+        <div class="actions">
+          <a class="button button-primary" href="{safe_add_url}">Add to F-Droid <span aria-hidden="true">↗</span></a>
+          <a class="button" href="#apps">Browse apps <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+      <aside class="repo-card" aria-label="Repository address">
+        <div class="repo-label">Repository endpoint</div>
+        <div class="repo-title">Ready for F-Droid</div>
+        <p class="repo-note">The install link opens F-Droid with this repository prefilled.</p>
+        <div class="url-box">
+          <code id="repo-url">{safe_repo_url}</code>
+          <button class="copy" id="copy-repo" type="button">Copy</button>
+        </div>
+        <a class="button" href="{safe_repo_url}">View raw repository <span aria-hidden="true">↗</span></a>
+      </aside>
+    </section>
+
+    <section class="content" id="apps">
+      <div class="section-head">
+        <div>
+          <h2>Available apps</h2>
+          <p class="section-copy">Signed Android packages published in this repository.</p>
+        </div>
+        <span class="app-count" id="app-count">Loading</span>
+      </div>
+      <div class="app-grid" id="app-list" aria-live="polite">
+        <div class="state"><strong>Loading the catalog…</strong>Reading the latest repository index.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <span>Distributed with F-Droid technology.</span>
+    <a href="{safe_source_url}" target="_blank" rel="noreferrer">View the distribution kit source ↗</a>
+  </footer>
+
+  <script>
+    const appList = document.getElementById('app-list');
+    const appCount = document.getElementById('app-count');
+    const copyButton = document.getElementById('copy-repo');
+    const repoUrl = document.getElementById('repo-url').textContent;
+
+    copyButton.addEventListener('click', async () => {{
+      try {{
+        await navigator.clipboard.writeText(repoUrl);
+        copyButton.textContent = 'Copied';
+        window.setTimeout(() => {{ copyButton.textContent = 'Copy'; }}, 1600);
+      }} catch (_) {{
+        copyButton.textContent = 'Select URL';
+      }}
+    }});
+
+    function element(tag, className, text) {{
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }}
+
+    function renderApp(app) {{
+      const card = element('article', 'app-card');
+      const top = element('div', 'app-top');
+      const icon = element('div', 'app-icon', (app.name || app.id).slice(0, 2).toUpperCase());
+      if (app.icon_url) {{
+        const image = document.createElement('img');
+        image.src = app.icon_url;
+        image.alt = '';
+        image.loading = 'lazy';
+        image.addEventListener('error', () => image.remove());
+        icon.append(image);
+      }}
+      const identity = document.createElement('div');
+      identity.append(element('h3', 'app-name', app.name || app.id));
+      identity.append(element('div', 'app-id', app.id));
+      top.append(icon, identity);
+
+      const summary = element('p', 'summary', app.summary || 'Available as a signed Android package.');
+      const footer = element('div', 'app-footer');
+      footer.append(element('span', 'version', `Version ${{app.version}}`));
+      const actions = element('div', 'app-actions');
+      if (app.source_url) {{
+        const source = element('a', 'text-link', 'Source ↗');
+        source.href = app.source_url;
+        source.target = '_blank';
+        source.rel = 'noreferrer';
+        actions.append(source);
+      }}
+      const download = element('a', 'download', 'Download APK ↓');
+      download.href = app.download_url;
+      actions.append(download);
+      footer.append(actions);
+      card.append(top, summary, footer);
+      return card;
+    }}
+
+    async function loadApps() {{
+      try {{
+        const response = await fetch('/api/apps', {{ headers: {{ Accept: 'application/json' }} }});
+        if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+        const data = await response.json();
+        const apps = Array.isArray(data.apps) ? data.apps : [];
+        appList.replaceChildren();
+        appCount.textContent = `${{apps.length}} ${{apps.length === 1 ? 'app' : 'apps'}}`;
+        if (!apps.length) {{
+          const empty = element('div', 'state');
+          empty.append(element('strong', '', 'No apps published yet'));
+          empty.append(document.createTextNode('The catalog will update automatically after the first APK is published.'));
+          appList.append(empty);
+          return;
         }}
-        
-        loadApps();
-    </script>
+        apps.forEach(app => appList.append(renderApp(app)));
+      }} catch (_) {{
+        appCount.textContent = 'Unavailable';
+        const error = element('div', 'state');
+        error.append(element('strong', '', 'Could not load the catalog'));
+        error.append(document.createTextNode('The repository is still available from the link above. Try refreshing this page.'));
+        appList.replaceChildren(error);
+      }}
+    }}
+
+    loadApps();
+  </script>
 </body>
 </html>""")

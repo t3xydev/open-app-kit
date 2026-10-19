@@ -25,6 +25,7 @@ docker compose up --build -d
 - API / health: `http://localhost:8000/health`
 - Status: `http://localhost:8000/api/status`
 - Repo (self-host): `http://localhost:8000/fdroid/repo/`
+- Homepage: `http://localhost:8000/` (app catalog, source link, and F-Droid deep link)
 
 One volume only: `./data:/data` (apks, metadata, repo, keystore, configs, status).
 
@@ -129,7 +130,7 @@ data/
 See [`env.example`](env.example):
 
 - **Mode**: `SELF_HOST`, `DATA_DIR`
-- **Repo**: `REPO_NAME`, `REPO_URL`, `REPO_DESCRIPTION`, `REPO_WEB_BASE_URL`
+- **Repo**: `REPO_NAME`, `REPO_URL`, `REPO_DESCRIPTION`, `REPO_WEB_BASE_URL`, `SOURCE_REPO_URL`
 - **Signing**: `KEYSTORE_FILE`, `REPO_KEYALIAS`, `KEYSTORE_PASS`, `KEY_PASS`, `KEYDNAME`
 - **Webhooks**: `WEBHOOK_TOKEN`, optional `EAS_WEBHOOK_SECRET` for `/hooks/eas`
 - **Notifications**: `APPRISE_CONFIG_URL` — Apprise [configuration URL](https://github.com/caronc/apprise/wiki/config) for publish success/failure alerts (leave blank to disable). Recommended: `/data/apprise.yml` on the volume with your service URLs (`discord://…`, etc.).

@@ -34,6 +34,7 @@ class AppPageTests(unittest.TestCase):
         self.assertIn("https://apps.example/fdroid/repo/example.apk", page)
         self.assertIn("Add repository to F-Droid", page)
         self.assertIn("https://apps.example/apps/org.example.app", page)
+        self.assertIn('/assets/fonts/InterVariable.woff2', page)
 
     def test_escapes_app_metadata(self) -> None:
         app = {**self.app, "name": "<script>alert(1)</script>"}

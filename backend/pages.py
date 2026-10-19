@@ -59,6 +59,13 @@ def render_app_page(
   {f'<meta property="og:image" content="{icon_url}">' if icon_url else ''}
   <title>{name} — {safe_repo_name}</title>
   <style>
+    @font-face {{
+      font-family: "Inter";
+      src: url("/assets/fonts/InterVariable.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }}
     :root {{
       color-scheme: dark;
       --bg: #07110f;
@@ -81,6 +88,9 @@ def render_app_page(
         radial-gradient(circle at 5% 75%, rgba(41,108,90,.13), transparent 30rem),
         var(--bg);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-optical-sizing: auto;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
       line-height: 1.5;
     }}
     a {{ color: inherit; }}
@@ -238,8 +248,9 @@ def render_app_not_found(bundle_id: str, repo_name: str) -> str:
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#07110f"><title>App not found — {safe_repo_name}</title>
 <style>
+  @font-face {{ font-family: "Inter"; src: url("/assets/fonts/InterVariable.woff2") format("woff2"); font-style: normal; font-weight: 100 900; font-display: swap; }}
   :root {{ color-scheme: dark; }} * {{ box-sizing: border-box; }}
-  body {{ min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; color: #f5fbf8; background: radial-gradient(circle at 50% 0, #13342b, #07110f 48%); font-family: Inter, system-ui, sans-serif; }}
+  body {{ min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; color: #f5fbf8; background: radial-gradient(circle at 50% 0, #13342b, #07110f 48%); font-family: Inter, system-ui, sans-serif; font-optical-sizing: auto; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }}
   main {{ width: min(560px, 100%); padding: 38px; border: 1px solid rgba(177,232,210,.16); border-radius: 24px; background: rgba(18,34,30,.8); text-align: center; }}
   .mark {{ width: 58px; height: 58px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 17px; color: #062217; background: #7ef0bd; font-size: 1.4rem; font-weight: 800; }}
   h1 {{ margin: 0 0 10px; font-size: clamp(2rem, 7vw, 3rem); letter-spacing: -.05em; }}

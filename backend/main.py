@@ -487,6 +487,7 @@ async def hooks_eas(request: Request) -> dict[str, Any]:
 repo_dir = DATA_DIR / "repo"
 repo_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/fdroid/repo", StaticFiles(directory=str(repo_dir), html=True), name="repo")
+app.mount("/assets", StaticFiles(directory=str(ROOT_DIR / "assets")), name="assets")
 
 
 @app.get("/api/info")
@@ -561,6 +562,13 @@ def root(request: Request) -> HTMLResponse:
   <meta name="theme-color" content="#0a1714">
   <title>{safe_name}</title>
   <style>
+    @font-face {{
+      font-family: "Inter";
+      src: url("/assets/fonts/InterVariable.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }}
     :root {{
       color-scheme: dark;
       --bg: #07110f;
@@ -580,6 +588,9 @@ def root(request: Request) -> HTMLResponse:
       margin: 0;
       min-height: 100vh;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-optical-sizing: auto;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
       color: var(--text);
       background:
         radial-gradient(circle at 80% -10%, rgba(58, 209, 148, .19), transparent 36rem),

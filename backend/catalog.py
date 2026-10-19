@@ -24,6 +24,10 @@ def _public_repo_file(repo_url: str, filename: str) -> str:
     return f"{repo_url.rstrip('/')}/{quote(filename.lstrip('/'), safe='/')}"
 
 
+def _app_page_path(bundle_id: str) -> str:
+    return f"/apps/{quote(bundle_id, safe='.')}"
+
+
 def _icon_url(repo_url: str, icon: Any, *, v2: bool = False) -> str | None:
     if isinstance(icon, dict):
         icon = icon.get("en-US") or icon.get("en") or next(iter(icon.values()), None)
@@ -93,6 +97,7 @@ def parse_index_v1(index_data: dict[str, Any], repo_url: str) -> list[dict[str, 
         apps.append(
             {
                 "id": app_id,
+                "page_url": _app_page_path(app_id),
                 "name": _localized_text(metadata.get("name"), app_id),
                 "summary": _localized_text(metadata.get("summary")),
                 "version": str(latest.get("versionName") or latest.get("versionCode") or "Latest"),
@@ -131,6 +136,7 @@ def parse_index_v2(index_data: dict[str, Any], repo_url: str) -> list[dict[str, 
         apps.append(
             {
                 "id": str(app_id),
+                "page_url": _app_page_path(str(app_id)),
                 "name": _localized_text(metadata.get("name"), str(app_id)),
                 "summary": _localized_text(metadata.get("summary")),
                 "version": str(manifest.get("versionName") or manifest.get("versionCode") or "Latest"),

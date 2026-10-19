@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.catalog import fdroid_deep_link, parse_index_v1, parse_index_v2
 from backend.notify import notify_publish_result
+from backend.pages import render_app_not_found, render_app_page
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(ROOT_DIR))).resolve()
@@ -344,17 +345,20 @@ def read_repo_indexes() -> tuple[dict[str, Any], dict[str, Any]]:
     return indexes.get("index-v1.json", {}), indexes.get("index-v2.json", {})
 
 
-@app.get("/api/apps")
-def api_apps(request: Request) -> dict[str, Any]:
-    """Return homepage-ready apps from the repository's v2 or v1 index."""
-    repo_url = public_repo_url(request)
+def read_catalog(repo_url: str) -> tuple[list[dict[str, Any]], str]:
     index_v1, index_v2 = read_repo_indexes()
     apps = parse_index_v2(index_v2, repo_url) if index_v2 else []
     if not apps and index_v1:
         apps = parse_index_v1(index_v1, repo_url)
-
     repo_metadata = index_v1.get("repo", {}) if isinstance(index_v1.get("repo"), dict) else {}
-    fingerprint = str(repo_metadata.get("fingerprint") or "")
+    return apps, str(repo_metadata.get("fingerprint") or "")
+
+
+@app.get("/api/apps")
+def api_apps(request: Request) -> dict[str, Any]:
+    """Return homepage-ready apps from the repository's v2 or v1 index."""
+    repo_url = public_repo_url(request)
+    apps, fingerprint = read_catalog(repo_url)
     return {
         "apps": apps,
         "repository": {
@@ -503,6 +507,28 @@ def api_info() -> JSONResponse:
     )
 
 
+@app.get("/apps/{bundle_id}", response_class=HTMLResponse)
+def app_download_page(request: Request, bundle_id: str) -> HTMLResponse:
+    repo_url = public_repo_url(request)
+    repo_name = os.environ.get("REPO_NAME", "F-Droid Repository").strip() or "F-Droid Repository"
+    apps, fingerprint = read_catalog(repo_url)
+    app_data = next((item for item in apps if item.get("id") == bundle_id), None)
+    if app_data is None:
+        return HTMLResponse(
+            content=render_app_not_found(bundle_id, repo_name),
+            status_code=404,
+        )
+    return HTMLResponse(
+        content=render_app_page(
+            app_data,
+            repo_name=repo_name,
+            repo_url=repo_url,
+            add_url=fdroid_deep_link(repo_url, fingerprint),
+            page_url=str(request.url),
+        )
+    )
+
+
 @app.get("/")
 def root(request: Request) -> HTMLResponse:
     repo_url = public_repo_url(request)
@@ -641,6 +667,8 @@ def root(request: Request) -> HTMLResponse:
     .app-icon {{ width: 58px; height: 58px; flex: none; overflow: hidden; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 16px; color: var(--accent); background: #19342c; font-weight: 800; font-size: 1.15rem; }}
     .app-icon img {{ width: 100%; height: 100%; object-fit: cover; }}
     .app-name {{ margin: 0; font-size: 1.15rem; letter-spacing: -.02em; }}
+    .app-name a {{ text-decoration: none; }}
+    .app-name a:hover {{ color: var(--accent); }}
     .app-id {{ max-width: 260px; overflow: hidden; margin-top: 3px; color: var(--muted); font: .74rem ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }}
     .summary {{ flex: 1; margin: 20px 0; color: var(--muted); font-size: .92rem; }}
     .app-footer {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; }}
@@ -761,7 +789,12 @@ def root(request: Request) -> HTMLResponse:
         icon.append(image);
       }}
       const identity = document.createElement('div');
-      identity.append(element('h3', 'app-name', app.name || app.id));
+      const detailPath = app.page_url || `/apps/${{encodeURIComponent(app.id)}}`;
+      const title = element('h3', 'app-name');
+      const titleLink = element('a', '', app.name || app.id);
+      titleLink.href = detailPath;
+      title.append(titleLink);
+      identity.append(title);
       identity.append(element('div', 'app-id', app.id));
       top.append(icon, identity);
 
@@ -769,13 +802,9 @@ def root(request: Request) -> HTMLResponse:
       const footer = element('div', 'app-footer');
       footer.append(element('span', 'version', `Version ${{app.version}}`));
       const actions = element('div', 'app-actions');
-      if (app.source_url) {{
-        const source = element('a', 'text-link', 'Source ↗');
-        source.href = app.source_url;
-        source.target = '_blank';
-        source.rel = 'noreferrer';
-        actions.append(source);
-      }}
+      const details = element('a', 'text-link', 'View app →');
+      details.href = detailPath;
+      actions.append(details);
       const download = element('a', 'download', 'Download APK ↓');
       download.href = app.download_url;
       actions.append(download);

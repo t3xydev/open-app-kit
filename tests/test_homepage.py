@@ -29,6 +29,7 @@ class HomepageIndexTests(unittest.TestCase):
 
         self.assertEqual(len(apps), 1)
         self.assertEqual(apps[0]["name"], "Example App")
+        self.assertEqual(apps[0]["page_url"], "/apps/org.example.app")
         self.assertEqual(apps[0]["version"], "1.2")
         self.assertEqual(
             apps[0]["download_url"],
@@ -66,6 +67,7 @@ class HomepageIndexTests(unittest.TestCase):
 
         self.assertEqual(len(apps), 1)
         self.assertEqual(apps[0]["name"], "Second App")
+        self.assertEqual(apps[0]["page_url"], "/apps/org.example.second")
         self.assertEqual(apps[0]["version"], "2.0")
         self.assertEqual(
             apps[0]["icon_url"],

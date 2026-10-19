@@ -26,6 +26,7 @@ docker compose up --build -d
 - Status: `http://localhost:8000/api/status`
 - Repo (self-host): `http://localhost:8000/fdroid/repo/`
 - Homepage: `http://localhost:8000/` (app catalog, source link, and F-Droid deep link)
+- Latest app page: `http://localhost:8000/apps/<bundle-id>` (shareable F-Droid and direct APK links)
 
 One volume only: `./data:/data` (apks, metadata, repo, keystore, configs, status).
 

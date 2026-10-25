@@ -68,7 +68,7 @@ curl -X POST "http://localhost:8000/hooks/publish" \
 
 ### EAS Build
 
-Point an EAS Build webhook at `POST /hooks/eas`. Completed Android APK builds for `production`, `preview`, and `development` or `dev` are saved as `{displayName}_{production|preview|dev}.apk` and published. The display name comes from EAS `metadata.appName` or the app's `app.json` name.
+Point an EAS Build webhook at `POST /hooks/eas`. Completed Android APK builds for `production`, `preview`, and `development` or `dev` are saved with a content hash in the filename and published. The display name comes from EAS `metadata.appName` or the app's `app.json` name. The hash keeps each release URL stable so interrupted downloads cannot resume against different APK bytes.
 
 ```bash
 eas webhook:create \

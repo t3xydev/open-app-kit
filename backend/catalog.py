@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
 
 
 def _localized_text(value: Any, fallback: str = "") -> str:
@@ -150,7 +150,12 @@ def parse_index_v2(index_data: dict[str, Any], repo_url: str) -> list[dict[str, 
 
 
 def fdroid_deep_link(repo_url: str, fingerprint: str = "") -> str:
-    target = f"https://fdroid.link/#repo={quote(repo_url, safe=':/')}"
+    # fdroid.link expects a complete repository URL after '#', including the
+    # fingerprint as a query parameter on that URL.
+    parts = urlsplit(repo_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
     if fingerprint:
-        target += f"&fingerprint={quote(fingerprint, safe='')}"
-    return target
+        query = [(key, value) for key, value in query if key != "fingerprint"]
+        query.append(("fingerprint", fingerprint))
+    target = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+    return f"https://fdroid.link/#{target}"

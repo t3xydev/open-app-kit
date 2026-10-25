@@ -53,6 +53,10 @@ fi
 KS_PATH="$(keystore_path)"
 UPDATE_FLAGS=(--create-metadata --pretty)
 if [ ! -f "$KS_PATH" ]; then
+  if [ -s repo/index-v1.jar ] || [ -s repo/entry.jar ]; then
+    echo "ERROR: signing keystore is missing from an existing repository. Restore the original keystore; refusing to change the repository fingerprint."
+    exit 1
+  fi
   UPDATE_FLAGS+=(--create-key)
 fi
 

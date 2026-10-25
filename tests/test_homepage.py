@@ -82,7 +82,20 @@ class HomepageIndexTests(unittest.TestCase):
 
         self.assertEqual(
             link,
-            "https://fdroid.link/#repo=https://apps.example/fdroid/repo&fingerprint=ABC123",
+            "https://fdroid.link/#https://apps.example/fdroid/repo?fingerprint=ABC123",
+        )
+
+    def test_fdroid_link_without_fingerprint_or_with_existing_query(self) -> None:
+        self.assertEqual(
+            fdroid_deep_link("https://apps.example/fdroid/repo"),
+            "https://fdroid.link/#https://apps.example/fdroid/repo",
+        )
+        self.assertEqual(
+            fdroid_deep_link(
+                "https://apps.example/fdroid/repo?mirror=1&fingerprint=OLD",
+                "NEW",
+            ),
+            "https://fdroid.link/#https://apps.example/fdroid/repo?mirror=1&fingerprint=NEW",
         )
 
     def test_ignores_unsafe_source_url(self) -> None:

@@ -9,9 +9,12 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +130,29 @@ def safe_apk_name(filename: str | None) -> str:
     if not name.lower().endswith(".apk"):
         name = f"{name}.apk"
     return name or "upload.apk"
+
+
+def store_apk(upload: Path, original_name: str) -> str:
+    """Give new APK bytes a stable URL without replacing a published APK."""
+    original_name = safe_apk_name(original_name)
+    with upload.open("rb") as incoming:
+        digest = hashlib.file_digest(incoming, "sha256").hexdigest()
+    legacy = DATA_DIR / "apks" / original_name
+    if legacy.is_file():
+        with legacy.open("rb") as existing:
+            if hashlib.file_digest(existing, "sha256").hexdigest() == digest:
+                upload.unlink()
+                return original_name
+    filename = f"{Path(original_name).stem}-{digest[:16]}.apk"
+    dest = DATA_DIR / "apks" / filename
+    if dest.is_file():
+        with dest.open("rb") as existing:
+            if hashlib.file_digest(existing, "sha256").hexdigest() == digest:
+                upload.unlink()
+                return filename
+        raise RuntimeError(f"APK filename collision: {filename}")
+    upload.replace(dest)
+    return filename
 
 
 def eas_channel_from_profile(build_profile: str | None) -> str | None:
@@ -345,13 +371,38 @@ def read_repo_indexes() -> tuple[dict[str, Any], dict[str, Any]]:
     return indexes.get("index-v1.json", {}), indexes.get("index-v2.json", {})
 
 
+@lru_cache(maxsize=8)
+def _signed_index_fingerprint(path: str, modified_ns: int, size: int) -> str:
+    try:
+        result = subprocess.run(
+            ["keytool", "-printcert", "-jarfile", path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = re.search(r"SHA256:\s*([0-9A-Fa-f:]{95})", result.stdout)
+    return match.group(1).replace(":", "").upper() if match else ""
+
+
+def repo_fingerprint() -> str:
+    """Read the SHA-256 certificate fingerprint from the published signed index."""
+    signed_index = DATA_DIR / "repo" / "index-v1.jar"
+    try:
+        stat = signed_index.stat()
+    except OSError:
+        return ""
+    return _signed_index_fingerprint(str(signed_index), stat.st_mtime_ns, stat.st_size)
+
+
 def read_catalog(repo_url: str) -> tuple[list[dict[str, Any]], str]:
     index_v1, index_v2 = read_repo_indexes()
     apps = parse_index_v2(index_v2, repo_url) if index_v2 else []
     if not apps and index_v1:
         apps = parse_index_v1(index_v1, repo_url)
-    repo_metadata = index_v1.get("repo", {}) if isinstance(index_v1.get("repo"), dict) else {}
-    return apps, str(repo_metadata.get("fingerprint") or "")
+    return apps, repo_fingerprint()
 
 
 @app.get("/api/apps")
@@ -386,13 +437,21 @@ async def hooks_apk(
 ) -> dict[str, Any]:
     ensure_data_dirs()
     filename = safe_apk_name(file.filename)
-    dest = DATA_DIR / "apks" / filename
-    with dest.open("wb") as out:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
+    with tempfile.NamedTemporaryFile(dir=DATA_DIR / "tmp", suffix=".apk", delete=False) as out:
+        upload = Path(out.name)
+        try:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        except BaseException:
+            upload.unlink(missing_ok=True)
+            raise
+    try:
+        filename = store_apk(upload, filename)
+    finally:
+        upload.unlink(missing_ok=True)
     status = await run_publish_job(f"apk:{filename}")
     status["apk"] = filename
     return status
@@ -464,8 +523,13 @@ async def hooks_eas(request: Request) -> dict[str, Any]:
 
     ensure_data_dirs()
     filename = eas_bundle_name(display_name, channel)
-    dest = DATA_DIR / "apks" / filename
-    await download_url_to_file(build_url, dest)
+    with tempfile.NamedTemporaryFile(dir=DATA_DIR / "tmp", suffix=".apk", delete=False) as out:
+        upload = Path(out.name)
+    try:
+        await download_url_to_file(build_url, upload)
+        filename = store_apk(upload, filename)
+    finally:
+        upload.unlink(missing_ok=True)
 
     result = await run_publish_job(f"eas:{filename}")
     result["apk"] = filename
@@ -486,7 +550,21 @@ async def hooks_eas(request: Request) -> dict[str, Any]:
 # Clients should use REPO_URL pointing here when mode is self_host.
 repo_dir = DATA_DIR / "repo"
 repo_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/fdroid/repo", StaticFiles(directory=str(repo_dir), html=True), name="repo")
+
+
+class RepoStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: dict[str, Any]):
+        response = await super().get_response(path, scope)
+        # Hash-named APKs are immutable; metadata and legacy APK paths are not.
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable"
+            if re.search(r"-[0-9a-f]{16}\.apk$", path) and response.status_code in {200, 206}
+            else "no-store"
+        )
+        return response
+
+
+app.mount("/fdroid/repo", RepoStaticFiles(directory=str(repo_dir), html=True), name="repo")
 app.mount("/assets", StaticFiles(directory=str(ROOT_DIR / "assets")), name="assets")
 
 
@@ -544,7 +622,7 @@ def root(request: Request) -> HTMLResponse:
     ).strip()
     index_v1, _ = read_repo_indexes()
     repo_metadata = index_v1.get("repo", {}) if isinstance(index_v1.get("repo"), dict) else {}
-    fingerprint = str(repo_metadata.get("fingerprint") or "")
+    fingerprint = repo_fingerprint()
     add_url = fdroid_deep_link(repo_url, fingerprint)
 
     safe_name = html.escape(repo_name)
